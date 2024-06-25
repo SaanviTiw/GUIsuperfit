@@ -1,6 +1,7 @@
 #import dash
 import dash_table
 import dash_core_components as dcc
+import dash_bootstrap_components as dbc
 import dash_html_components as html
 from dash.dependencies import Input, Output
 import numpy as np
@@ -13,7 +14,7 @@ import plotly.graph_objs as go
 from app import app
 
 plotly.tools.set_credentials_file(username='ahowell', api_key='IV3kTKFQTTugQOjv5Yga')
-external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
+#external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
 
 ##### Functions #########
 
@@ -144,28 +145,52 @@ normalized_observed_spectrum = normalize_spectrum(observed_spectrum)
 sgbody = html.Div([
     #html.Div(id='datatable-interactivity-container',figure={"layout":go.Layout{width=500}}),
     html.Div(id='datatable-interactivity-container'),
-    html.Label('Show graphs:'),
-    dcc.Checklist(
-        id='plotting_checklist',
-        options=[
-            {'label': 'Observation - Galaxy', 'value': 'omg'},
-            {'label': 'Template', 'value': 'tem'},
-            {'label': 'Galaxy', 'value': 'gal'},
-            {'label': 'Observation', 'value': 'obs'},
-            {'label': 'Normalized Template', 'value': 'ute'}
-        ],
-        value=['omg', 'tem'],
-        style={'columnCount': 6},
-        #style={'padding': '10px'}
-        labelStyle={'display': 'inline-block'}
-    ),
-    html.Label('Binning (A):'),
-    dcc.Input(
-    id='bin_input',
-    size='30px',
-    type='number',
-    value=sfo_dictionary["disp"],
-    ),
+    dbc.Row([
+        dbc.Col(
+            html.Label(
+                'Binning (A):',
+                style={
+                    'fontWeight': 'bold',
+                    },
+                ),
+            width='auto'
+            ),
+        dbc.Col(
+            dcc.Input(
+                id='bin_input',
+                size='30px',
+                type='number',
+                value=sfo_dictionary["disp"],
+            ),
+            width='auto'
+            ),
+        dbc.Col(
+            html.Label(
+                'Show graphs:',
+                 style={
+                    'fontWeight': 'bold',
+                    },
+                ),
+            width='auto'
+            ),
+        dbc.Col(
+            dcc.Checklist(
+                id='plotting_checklist',
+                options=[
+                    {'label': 'Observation - Galaxy', 'value': 'omg'},
+                    {'label': 'Template', 'value': 'tem'},
+                    {'label': 'Galaxy', 'value': 'gal'},
+                    {'label': 'Observation', 'value': 'obs'},
+                    {'label': 'Normalized Template', 'value': 'ute'}
+                ],
+                value=['omg', 'tem'],
+                #style={'columnCount': 6},
+                #style={'padding': '10px'}
+                labelStyle={'display': 'inline-block'}
+            ),
+            width='auto'
+            ),
+        ]),
     dash_table.DataTable(
         id='datatable-interactivity',
         columns=[
@@ -179,47 +204,54 @@ sgbody = html.Div([
         style_cell_conditional=[
             {'if': {'column_id': 'SN'},
              'textAlign': 'left',
-              'width': '20px'},
+              'width': '100px'},
             {'if': {'column_id': 'Epoch'},
              'textAlign': 'left',
-             'width': '20px'},
+             'width': '100px'},
             {'if': {'column_id': 'Type'},
              'textAlign': 'left',
-             'width': '20px'},
+             'width': '100px'},
             {'if': {'column_id': 'S'},
-             'width': '20px'},
+             'width': '100px'},
             {'if': {'column_id': 'z'},
-             'width': '20px'},
+             'width': '100px'},
             {'if': {'column_id': 'Galaxy'},
              'textAlign': 'left',
-             'width': '20px'},
+             'width': '100px'},
             {'if': {'column_id': 'Av'},
-             'width': '20px'},
+             'width': '100px'},
             {'if': {'column_id': 'C'},
-             'width': '20px'},
+             'width': '100px'},
             {'if': {'column_id': 'F'},
-             'width': '20px'},
+             'width': '100px'},
             {'if': {'column_id': 'gfrac'},
-             'width': '20px'},
+             'width': '100px'},
             {'if': {'column_id': 'sfrac'},
-             'width': '20px'}
+             'width': '100px'}
         ],
         data=df.to_dict('records'),
         row_selectable = 'single',
-        editable=True,
+        #editable=True,
         filter_action='native',
         sort_action='native',
         sort_mode='single',
         row_deletable=True,
         #selected_rows=[],
         #n_fixed_rows=2,
+        #style_as_list_view=True,
         style_cell={'width': '30px'},
-        #style_table={
-        #    'maxHeight': '500px',
-        #    'overflowY': 'scroll',
-        #    'border': 'thin lightgrey solid'
+        #style_data={
+        #    'width': '100px',
+        #    'maxWidth': '100px',
+        #   'minWidth': '100px',
         #},
-        page_action='none',
+        fixed_rows={'headers': True},
+        style_table={
+            'maxHeight': '500px',
+            'overflowY': 'auto',
+            'border': 'thin lightgrey solid'
+        },
+        page_action='native',
         #pagination_mode="fe",
         #pagination_settings={
         #    "current_page": 0,

@@ -333,7 +333,7 @@ def parse_contents(contents, filename):
     return df
 
 # Set up layout on web page
-body = dbc.Container(
+sfbody = dbc.Container(
     [
         dbc.Row(
             [
@@ -364,7 +364,7 @@ body = dbc.Container(
     className="mt-4",
 )
 
-app.layout = html.Div([navbar, body])
+app.layout = html.Div([navbar, sfbody])
 
 # Display slider values
 @app.callback(
