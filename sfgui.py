@@ -195,7 +195,7 @@ sn_checklist=dbc.FormGroup([
         options=[
             {'label': i, 'value': i} for i in sn_list
         ],
-        values=sn_list,
+        value=sn_list,
         inline=True,
         className = 'sm-2'
     )
@@ -249,7 +249,7 @@ galaxy_checklist=html.Details([
             options=[
                 {'label': i, 'value': i} for i in galaxy_list
             ],
-            values=[],
+            value=[],
             inline=True,
             className = 'sm-2'
         )
@@ -387,9 +387,9 @@ def wave_slider_update(value):
      Input(component_id='z1-input', component_property='value'),
      Input(component_id='z2-input', component_property='value'),
      Input(component_id='dz-input', component_property='value'),
-     Input(component_id='SN-types', component_property='values'),
+     Input(component_id='SN-types', component_property='value'),
      Input(component_id='epoch-slider', component_property='value'),
-     Input(component_id='galaxy-types', component_property='values'),
+     Input(component_id='galaxy-types', component_property='value'),
      Input(component_id='wave-slider', component_property='value'),
      #Input(component_id='upload-data', component_property='filename')
      ],

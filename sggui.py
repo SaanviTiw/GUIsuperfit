@@ -152,7 +152,7 @@ app.layout = html.Div([
             {'label': 'Observation', 'value': 'obs'},
             {'label': 'Normalized Template', 'value': 'ute'}
         ],
-        values=['omg', 'tem'],
+        value=['omg', 'tem'],
         style={'columnCount': 6}
     ),
     html.Label('Binning (A):'),
@@ -202,13 +202,13 @@ app.layout = html.Div([
         ],
         data=df.to_dict('records'),
         editable=True,
-        filtering=True,
-        sorting=True,
-        sorting_type="multi",
+        #filtering=True,
+        #sorting=True,
+        #sorting_type="multi",
         row_selectable="single",
         row_deletable=True,
         selected_rows=[],
-        n_fixed_rows=2,
+        #n_fixed_rows=2,
         #style_cell={'width': '30px'},
         style_table={
             'maxHeight': '500px',
@@ -227,7 +227,7 @@ app.layout = html.Div([
 @app.callback(
     Output('datatable-interactivity-container', "children"),
     [Input('datatable-interactivity', "derived_virtual_data"),
-     Input('datatable-interactivity', "derived_virtual_selected_rows"),Input('bin_input', 'value'),Input('plotting_checklist', 'values')])
+     Input('datatable-interactivity', "derived_virtual_selected_rows"),Input('bin_input', 'value'),Input('plotting_checklist', 'value')])
 def update_graphs(rows, derived_virtual_selected_rows,bin_input,plotting_checklist):
     # When the table is first rendered, `derived_virtual_data` and
     # `derived_virtual_selected_rows` will be `None`. This is due to an
