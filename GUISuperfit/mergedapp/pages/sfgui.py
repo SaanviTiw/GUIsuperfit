@@ -1,4 +1,4 @@
-'''import dash
+import dash
 import dash_bootstrap_components as dbc
 from dash import dcc, html, dash_table
 from dash.dependencies import Input, Output, State
@@ -11,10 +11,11 @@ import json
 from astropy.io import fits
 import os
 import subprocess
+from dash import callback
 
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP],)
-app.scripts.config.serve_locally = True
+
 dash.register_page(__name__)
+
 
 # Navigation bar
 navbar = dbc.NavbarSimple(
@@ -74,7 +75,7 @@ redshift_range_tab_content = dbc.Card(
 
 
 # Layout integration
-app.layout = dbc.Container(
+layout = dbc.Container(
     [
         dbc.Row(
             dbc.Col(redshift_range_tab_content, width=6),
@@ -142,6 +143,8 @@ old_zform = dbc.Row([
 	)
 ])
 
+UPLOAD_DIRECTORY = os.path.abspath("/home/stiwary/Superfit/NGSF")
+
 
 uploader = html.Div([
 	dcc.Upload(
@@ -163,9 +166,14 @@ uploader = html.Div([
     	# Allow multiple files to be uploaded
     	multiple=False
 	),
+	html.Div(id='output-data-upload'),
 	#dcc.Graph(id = 'output-data-upload'),
 	#html.Div(id='output-data-upload'),
 ])
+
+# Define the upload directory (use absolute path for clarity)
+
+
 
 
 #Store info about choices user made to send to sggui
@@ -189,6 +197,7 @@ generate_json_button = dbc.Button(
 
 json_output = html.Div(id='json-output')
 
+download_json = dcc.Download(id="download-json")
 # Run Fit button
 run_fit_button = dbc.Button(
 	"Run Fit",
@@ -198,12 +207,12 @@ run_fit_button = dbc.Button(
 )
 
 # Define app layout
-app.layout = html.Div([
+layout = html.Div([
 	navbar,
 	dbc.Container([
     	dbc.Row([
         	dbc.Col(zform, md=6),
-        	dbc.Col(html.Div([uploader, generate_json_button, run_fit_button]), md=6),
+        	dbc.Col(html.Div([uploader, generate_json_button, run_fit_button, download_json]), md=6),
     	], className="mt-4"),
     	json_output
 	]),
@@ -246,7 +255,7 @@ sn_checklist = dbc.CardGroup([
 
 
 
-app.layout = html.Div([
+layout = html.Div([
     html.H1("Supernovae"),
     sn_checklist,
     html.Div(id='output-selected-supernovae')
@@ -272,21 +281,21 @@ epochs = dbc.CardGroup([
 ])
 
 
-app.layout = html.Div([
+layout = html.Div([
 	sn_checklist
 ])
 
 
 
 # Other components in your layout
-app.layout = html.Div([
+layout = html.Div([
 	epochs,
 	dcc.Upload(id='upload-data'),
 	html.Div(id='output-container-waveslider'),
 	# Add other components as per your existing layout
 ])
 
-app.layout = html.Div([
+layout = html.Div([
 	navbar,
 	dbc.Container([
     	dbc.Row([
@@ -297,7 +306,7 @@ app.layout = html.Div([
 ])
 
 
-app.layout = html.Div([
+layout = html.Div([
 	html.H6('Wavelength Range Slider'),
 	dcc.RangeSlider(
     	id='wave-slider',
@@ -419,6 +428,7 @@ sfbody = dbc.Container(
                     	epochs,
                     	galaxy_checklist,
                     	reddening_section,
+                    	download_json,
                     	run_fit_button,
                     	generate_json_button,
                     	param_storage,
@@ -431,7 +441,7 @@ sfbody = dbc.Container(
             	dbc.Col(
                 	[
                     	figure,
-                    	app.layout,
+                    	layout,
                 	]
             	),
         	]
@@ -440,17 +450,38 @@ sfbody = dbc.Container(
 	className="mt-4",
 )
 
-app.layout = html.Div([navbar, sfbody, json_output])
+layout = html.Div([navbar, sfbody, json_output])
 
 
-@app.callback(
+@callback(
+    Output('output-data-upload', 'children'),
+    Input('upload-data', 'contents'),
+    State('upload-data', 'filename')
+)
+def update_output(contents, filename):
+    if contents:
+        content_type, content_string = contents.split(',')
+        decoded = base64.b64decode(content_string)
+        file_path = os.path.join(UPLOAD_DIRECTORY, filename)
+        print(f"Attempting to save file to: {file_path}")
+        try:
+            with open(file_path, 'wb') as f:
+                f.write(decoded)
+            return f"File '{filename}' uploaded successfully to {UPLOAD_DIRECTORY}."
+        except Exception as e:
+            print(f"Error saving file: {e}")
+            return f"Failed to save file '{filename}'."
+    return "No file uploaded."
+
+
+@callback(
 	Output('output-container-range-slider', 'children'),
 	Input('epoch-slider', 'value'))
 def epoch_slider_update(value):
 	return 'Epoch Range: "{}"'.format(value)
 
 #wavelength slider callback
-@app.callback(
+@callback(
 	Output('output-container-waveslider', 'children'),
 	Input('wave-slider', 'value'))
 def wave_slider_update(value):
@@ -458,7 +489,7 @@ def wave_slider_update(value):
 
 
 #Take ouput values from SN type checklist and pass them to local-storage
-@app.callback(Output(component_id='parameter-storage', component_property='data'),
+@callback(Output(component_id='parameter-storage', component_property='data'),
 	[Input(component_id='z-known', component_property='value'),
  	Input(component_id='z1-input', component_property='value'),
  	Input(component_id='z2-input', component_property='value'),
@@ -491,7 +522,7 @@ def update_storage(z,z1,z2,dz,SNe_selected, epoch_ranges,galaxies_selected,wavel
 	return params
 
 # output stuff to be stored into report-box
-@app.callback(Output(component_id='report-box', component_property='children'),
+@callback(Output(component_id='report-box', component_property='children'),
               	# Since we use the data prop in an output,
               	# we cannot get the initial data on load with the data prop.
               	# To counter this, you can use the modified_timestamp
@@ -511,7 +542,7 @@ def report_stored(stored_params,stored_df):
 	output_stored = 'Parameters: "{}"'.format(stored_params)
 	return output_stored
 
-@app.callback(
+@callback(
 	Output(component_id='spectrum-figure', component_property='figure'),
 	[Input(component_id='upload-data', component_property='contents'),
  	Input(component_id='wave-slider', component_property='value')],
@@ -556,7 +587,7 @@ def update_figure(contents, wave_limits, filename):
 
 
 
-@app.callback(
+@callback(
 	Output('SN-types', 'value'),
 	Input('SN-types', 'value'),
 	State('SN-types', 'options')
@@ -576,25 +607,8 @@ def update_sn_selection(selected_values, options):
     return [value for value in updated_values if value in selected_values or value in sn_categories or any(value in sn_types for sn_types in sn_categories.values())]
 
 
-
-
-
-
-
-# Function to write JSON to a file
-def write_json(target_path, target_file, data):
-    if not os.path.exists(target_path):
-        try:
-            os.makedirs(target_path)
-        except Exception as e:
-            print(e)
-            raise
-    with open(os.path.join(target_path, target_file), 'w') as f:
-        json.dump(data, f)
-
-# Callback to generate the JSON
-@app.callback(
-    Output('json-output', 'children'),
+@callback(
+    Output('download-json', 'data'),
     [Input('generate-json-button', 'n_clicks')],
     [
         State('z-known', 'value'),
@@ -603,16 +617,13 @@ def write_json(target_path, target_file, data):
         State('dz-input', 'value'),
         State('upload-data', 'contents'),
         State('upload-data', 'filename'),
-    	State('SN-types', 'value'),
+        State('SN-types', 'value'),
         State('epoch-slider', 'value'),
         State('galaxy-types', 'value'),
-        State('wave-slider', 'value'),
-        State('A_hi-input', 'value'),
-        State('A_lo-input', 'value'),
-        State('A_i-input', 'value'),
+        State('wave-slider', 'value')
     ]
 )
-def generate_json(n_clicks, z_known, z1_input, z2_input, dz_input, contents, filename, SNe_selected, epoch_ranges, galaxies_selected, wavelength_ranges, A_hi, A_lo, A_i):
+def generate_json(n_clicks, z_known, z1_input, z2_input, dz_input, contents, filename, sn_types, epoch_ranges, galaxies_selected, wavelength_ranges):
     if n_clicks is None:
         raise PreventUpdate
     parameters = {}
@@ -625,8 +636,8 @@ def generate_json(n_clicks, z_known, z1_input, z2_input, dz_input, contents, fil
         parameters['z_range_begin'] = z1_input
         parameters['z_range_end'] = z2_input
         parameters['z_int'] = dz_input
-    if SNe_selected:
-        parameters['temp_sn_tr'] = SNe_selected
+    if sn_types:
+        parameters['temp_sn_tr'] = sn_types
     if galaxies_selected:
         parameters['temp_gal_tr'] = galaxies_selected
     if wavelength_ranges:
@@ -635,13 +646,6 @@ def generate_json(n_clicks, z_known, z1_input, z2_input, dz_input, contents, fil
     if epoch_ranges:
         parameters['epoch_high'] = epoch_ranges[1]
         parameters['epoch_low'] = epoch_ranges[0]
-    if A_hi is not None:
-        parameters['A_hi'] = A_hi
-    if A_lo is not None:
-        parameters['A_lo'] = A_lo
-    if A_i is not None:
-        parameters['A_i'] = A_i
-   
     parameters['resolution'] = 10
     parameters['error_spectrum'] = "sg"
     parameters['saving_results_path'] = ""
@@ -650,29 +654,18 @@ def generate_json(n_clicks, z_known, z1_input, z2_input, dz_input, contents, fil
     parameters['mask_galaxy_lines'] = 1
     parameters['mask_telluric'] = 1
     parameters['minimum_overlap'] = 0.7
+    parameters['Alam_high'] = 2
+    parameters['Alam_low'] = -2
+    parameters['Alam_interval'] = 0.2
     if contents:
         df = parse_contents(contents, filename)
         if not df.empty:
             df_dict = df.to_dict('records')
             parameters['data'] = df_dict
-
-    save_dir = os.path.expanduser('~/Superfit/NGSF')
-    save_file = 'fit_parameters.json'
-    write_json(save_dir, save_file, parameters)
-
     json_str = json.dumps(parameters, indent=4)
-    b64_json = base64.b64encode(json_str.encode()).decode('utf-8')
-    href = f"data:application/json;charset=utf-8;base64,{b64_json}"
-    return html.A("Download JSON", href=href, download="fit_parameters.json")
+    return dcc.send_string(json_str, "parameters.json")
 
-
-
-
-
-
-
-# Callback to store the uploaded file
-@app.callback(
+@callback(
     Output('df-storage', 'data'),
     Input('upload-data', 'contents'),
     State('upload-data', 'filename')
@@ -683,14 +676,6 @@ def store_uploaded_file(contents, filename):
         if not df.empty:
             return df.to_dict('records')
     return None
-
-def store_uploaded_file(contents, filename):
-    if contents:
-        df = parse_contents(contents, filename)
-        if not df.empty:
-            return df.to_dict('records')
-    return None
-    
 def update_df_storage(contents, wave_limits, filename):
     if contents is not None:
         dff = parse_contents(contents, filename)
@@ -701,8 +686,7 @@ def update_df_storage(contents, wave_limits, filename):
         return output
 
 
-
-@app.callback(
+@callback(
     Output('run-fit-button', 'children'),
     [Input('run-fit-button', 'n_clicks')],
     [State('parameter-storage', 'data')]
@@ -710,339 +694,14 @@ def update_df_storage(contents, wave_limits, filename):
 def run_fit(n_clicks, parameters):
     if n_clicks is None:
         raise PreventUpdate
-
-    # Activate the conda environment and run the command
-    fit_command = "source ~/miniconda3/etc/profile.d/conda.sh && conda activate NGSF && cd ~/Superfit/NGSF && python run.py fit_parameters.json"
-
-    # Open a new terminal window and execute the command
-    subprocess.Popen(['gnome-terminal', '--', 'bash', '-c', f'{fit_command}; exec bash'])
-
-    return "Running Fit..."  # Update the button text or return any message
-
-
-
-if __name__ == '__main__':
-    app.run_server(debug=True)
-'''
-import dash
-import dash_bootstrap_components as dbc
-from dash import dcc, html, callback
-from dash.dependencies import Input, Output
-import pandas as pd
-import plotly.graph_objs as go
-import base64
-import io
-from astropy.io import fits
-
-dash.register_page(__name__)
-
-# Navigation bar
-navbar = dbc.NavbarSimple(
-    children=[
-        dbc.NavItem(dbc.NavLink("Link", href="#")),
-        dbc.DropdownMenu(
-            nav=True,
-            in_navbar=True,
-            label="Menu",
-            children=[
-                dbc.DropdownMenuItem("Entry 1"),
-                dbc.DropdownMenuItem("Entry 2"),
-                dbc.DropdownMenuItem(divider=True),
-                dbc.DropdownMenuItem("Entry 3"),
-            ],
-        ),
-    ],
-    brand="Superfit",
-    brand_href="#",
-    sticky="top",
-)
-
-# Layout components
-known_redshift_tab_content = dbc.Card(
-    dbc.CardBody(
-        dbc.Row(
-            [
-                dbc.Col(html.Label("z", className="mr-1"), width="auto"),
-                dbc.Col(dbc.Input(id='z-known', type="number", size="sm"), width=5),
-            ],
-            className="align-items-center"
-        ),
-    ),
-    className="mt-1",
-)
-
-redshift_range_tab_content = dbc.Card(
-    dbc.CardBody(
-        dbc.Row(
-            [
-                dbc.Col(html.Label("z1", className="mr-1"), width="auto"),
-                dbc.Col(dbc.Input(id='z1-input', type="number", size="sm", className='no-arrows'), width=2),
-                dbc.Col(html.Label("z2", className="mr-1"), width="auto"),
-                dbc.Col(dbc.Input(id='z2-input', type="number", size="sm", className='no-arrows'), width=2),
-                dbc.Col(html.Label("dz", className="mr-1"), width="auto"),
-                dbc.Col(dbc.Input(id='dz-input', type="number", size="sm", className='no-arrows'), width=2),
-            ],
-            className="align-items-center"
-        ),
-    ),
-    className="mt-1",
-)
-
-zform = dbc.Tabs(
-    [
-        dbc.Tab(known_redshift_tab_content, label="Known redshift", className="mr-1"),
-        dbc.Tab(redshift_range_tab_content, label="Redshift range", className="mr-1")
-    ]
-)
-
-uploader = html.Div([
-    dcc.Upload(
-        id='upload-data',
-        children=html.Div(['Drag and Drop or ', html.A('Select Files')]),
-        style={
-            'width': '100%',
-            'height': '60px',
-            'lineHeight': '60px',
-            'borderWidth': '1px',
-            'borderStyle': 'dashed',
-            'borderRadius': '5px',
-            'textAlign': 'center',
-            'margin': '2px'
-        },
-        multiple=False
-    ),
-])
-
-param_storage = dcc.Store(id='parameter-storage', storage_type='session')
-df_storage = dcc.Store(id='df-storage', storage_type='session')
-
-generate_json_button = dbc.Button("Generate JSON", color="secondary", id="generate-json-button", className="mr-1")
-run_fit_button = dbc.Button("Run Fit", color="primary", id="run-fit-button", className="mr-1")
-json_output = html.Div(id='json-output')
-
-# Supernova types and options
-sn_categories = {
-    'IA': ["Ia 02es-like", "Ia-02cx like", "Ia-CSM-(ambiguous)", "Ia 91T-like", "Ia-CSM", "Ia-norm", "Ia 91bg-like", "Ia-rapid"],
-    'IB': ["Ib", "Ca-Ib"],
-    'II': ["IIb-flash", "II", "IIb", "II-flash", "ILRT"],
-    'SLSN': ["SLSN-II", "SLSN-IIn", "SLSN-I", "SLSN-Ib", "SLSN-IIb"],
-    'Other': ["computed", "TDE He", "Ca-Ia", "super_chandra", "IIn", "FBOT", "Ibn", "TDE H", "SN - Imposter", "TDE H+He", "Ic", "Ia-pec", "Ic-BL", "Ic-pec"]
-}
-
-sn_options = [{'label': category, 'value': category} for category in sn_categories.keys()]
-for sn_types in sn_categories.values():
-    sn_options.extend([{'label': f"  {sn}", 'value': sn} for sn in sn_types])
-
-sn_checklist = dbc.CardGroup([
-    html.H6('Supernova types'),
-    dbc.Checklist(
-        id='SN-types',
-        options=sn_options,
-        value=[],
-        inline=True,
-        className='sm-2'
-    )
-], className='card p-1')
-
-# Epochs and wavelength sliders
-epochs = dbc.CardGroup([
-    dbc.CardBody([
-        html.H6('Epochs Range Slider'),
-        dcc.RangeSlider(
-            id='epoch-slider',
-            min=-100,
-            max=700,
-            step=1,
-            value=[-30, 30],
-            marks={i: {'label': str(i), 'style': {'color': 'black'}} for i in range(-100, 701, 100)},
-            allowCross=False,
-            updatemode='drag'
-        ),
-        html.Div(id='output-container-range-slider', style={'marginTop': 20})
-    ]),
-])
-
-wavelength_slider = html.Div([
-    html.H6('Wavelength Range Slider'),
-    dcc.RangeSlider(
-        id='wave-slider',
-        min=3000,
-        max=10000,
-        step=1,
-        value=[3000, 10000],
-        marks={3000: {'label': '3000', 'style': {'color': 'black'}},
-               10000: {'label': '10000', 'style': {'color': 'black'}}},
-        allowCross=False,
-        updatemode='drag'
-    ),
-    html.Div(id='output-container-waveslider', style={'marginTop': 20})
-])
-
-# Galaxies checklist
-galaxy_list = ['E', 'S0', 'Sa', 'Sb', 'Sc', 'SB1', 'SB2', 'SB3', 'SB4', 'SB5', 'SB6']
-galaxy_checklist = html.Details([
-    html.Summary('Galaxies'),
-    dbc.CardGroup([
-        dbc.Checklist(
-            id="galaxy-types",
-            options=[{'label': i, 'value': i} for i in galaxy_list],
-            value=[],
-            inline=True,
-            className='sm-2'
-        )
-    ], className='card p-1')
-])
-
-# Reddening section
-reddening_section = dbc.Card(
-    dbc.CardBody(
-        dbc.Row(
-            [
-                dbc.Col(html.Label("A_hi", className="mr-1"), width="auto"),
-                dbc.Col(dbc.Input(id='A_hi-input', type="number", size="sm", className='no-arrows'), width=2),
-                dbc.Col(html.Label("A_lo", className="mr-1 ml-3"), width="2"),
-                dbc.Col(dbc.Input(id='A_lo-input', type="number", size="sm", className='no-arrows'), width=2),
-                dbc.Col(html.Label("A_i", className="mr-1 ml-3"), width="auto"),
-                dbc.Col(dbc.Input(id='A_i-input', type="number", size="sm", className='no-arrows'), width=2),
-            ],
-            className="align-items-center"
-        ),
-    ),
-    className="mt-1",
-)
-
-# Spectrum figure
-figure = dcc.Graph(
-    id='spectrum-figure',
-    figure={
-        'data': [
-            go.Scatter(
-                x=[4000, 5000, 6000],
-                y=[1, 0.4, 0.9],
-                mode='lines',
-                line=dict(color="black", width=2)
-            )
-        ],
-        'layout': go.Layout(
-            xaxis=dict(title="Wavelength", tickformat=".0f"),
-            yaxis=dict(title='Normalized Flux'),
-            showlegend=True,
-            legend={'x': 0.7, 'y': 0.95},
-        )
-    }
-)
-
-# Define app layout
-layout = html.Div([
-    navbar,
-    dbc.Container([
-        dbc.Row([
-            dbc.Col(zform, md=6),
-            dbc.Col(html.Div([uploader, generate_json_button, run_fit_button]), md=6),
-        ], className="mt-4"),
-        dbc.Row([
-            dbc.Col([
-                sn_checklist,
-                epochs,
-                galaxy_checklist,
-                reddening_section,
-                wavelength_slider,
-                param_storage,
-                df_storage,
-                #report,
-            ], md=4),
-            dbc.Col([
-                figure,
-                json_output,
-            ]),
-        ]),
-    ]),
-])
-
-
-@callback(
-    Output('output-container-waveslider', 'children'),
-    Input('wave-slider', 'value')
-)
-def wave_slider_update(value):
-    return f'Wavelength range: {value}'
-
-
-@callback(
-    Output('parameter-storage', 'data'),
-    [
-        Input('z-known', 'value'),
-        Input('z1-input', 'value'),
-        Input('z2-input', 'value'),
-        Input('dz-input', 'value'),
-        Input('SN-types', 'value'),
-        Input('epoch-slider', 'value'),
-        Input('galaxy-types', 'value'),
-        Input('wave-slider', 'value'),
-        Input('A_hi-input', 'value'),
-        Input('A_lo-input', 'value'),
-        Input('A_i-input', 'value'),
-    ]
-)
-def update_storage(z, z1, z2, dz, SNe_selected, epoch_ranges, galaxies_selected, wavelength_ranges, A_hi, A_lo, A_i):
-    params = {
-        'z': z,
-        'z1': z1,
-        'z2': z2,
-        'dz': dz,
-        'SN types': SNe_selected,
-        'Epochs': epoch_ranges,
-        'Galaxy types': galaxies_selected,
-        'Wavelengths': wavelength_ranges,
-        'A_hi': A_hi,
-        'A_lo': A_lo,
-        'A_i': A_i
-    }
-    return params
-
-
-@callback(
-    Output('report-box', 'children'),
-    [
-        Input('parameter-storage', 'data'),
-        Input('df-storage', 'data')
-    ]
-)
-def report_stored(stored_params, stored_df):
-    output_stored = f'Parameters: {stored_params}'
-    return output_stored
-
-
-@callback(
-    Output('spectrum-figure', 'figure'),
-    [
-        Input('upload-data', 'contents'),
-        Input('wave-slider', 'value')
-    ],
-    [Input('upload-data', 'filename')]
-)
-def update_figure(contents, wave_slider_value, filename):
-    if contents is None:
+    # Ensure parameters are available
+    if parameters is None:
         raise PreventUpdate
-
-    df = parse_contents(contents, filename)
-    if df.empty:
-        return go.Figure()
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=df['wav'],
-        y=df['flux'],
-        mode='lines',
-        line=dict(color='black', width=2)
-    ))
-
-    fig.update_layout(
-        xaxis_title='Wavelength',
-        yaxis_title='Normalized Flux',
-        showlegend=True,
-        legend=dict(x=0.7, y=0.95)
-    )
-
-    return fig
-
+    # Save the parameters to a JSON file
+    with open('parameters.json', 'w') as f:
+        json.dump(parameters, f, indent=4)
+    # Activate the conda environment and run the command
+    fit_command = "source ~/miniconda3/etc/profile.d/conda.sh && conda activate NGSF && cd ~/Superfit/NGSF && python run.py parameters.json"
+    # Execute the fitting command
+    subprocess.Popen(['gnome-terminal', '--', 'bash', '-c', f'{fit_command}; exec bash'])
+    return "Running Fit..."  # Update the button text or return any message
