@@ -1,1 +1,10 @@
+/* This will remove the arrows from all number input fields with the class 'no-arrows' */
+input[type=number].no-arrows {
+    -moz-appearance: textfield;
+}
 
+input[type=number].no-arrows::-webkit-outer-spin-button,
+input[type=number].no-arrows::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
