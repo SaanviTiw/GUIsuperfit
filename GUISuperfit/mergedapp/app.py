@@ -32,7 +32,7 @@ tabs = dcc.Tabs(
 app.layout = html.Div(
     [
         tabs,
-        dcc.Location(id="url", refresh="callback-nav"),
+        dcc.Location(id="url", refresh=False),
         dash.page_container
     ]
 )
