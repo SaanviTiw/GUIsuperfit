@@ -34,9 +34,12 @@ def sn_hg_arrays(
     gal = []
     for i in range(0, len(templates_sn_trunc)):
 
+
         one_sn = templates_sn_trunc_dict[templates_sn_trunc[i]]
-        a_lam_sn = alam_dict[templates_sn_trunc[i]]
         redshifted_sn = one_sn[:, 0] * (z + 1)
+        
+        a_lam_sn = alam_dict[templates_sn_trunc[i]]
+        #redshifted_sn = one_sn[:, 0] * (z + 1)
         extinct_excon = one_sn[:, 1] * 10 ** (-0.4 * extcon * a_lam_sn) / (1 + z)
         sn_interp = np.interp(
             lam, redshifted_sn, extinct_excon, left=np.nan, right=np.nan
