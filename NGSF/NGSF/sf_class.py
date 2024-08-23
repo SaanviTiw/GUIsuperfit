@@ -175,260 +175,374 @@ class Superfit:
             masked_spectrum[:, 0], masked_spectrum[:, 1], "k", label=str(self.name)
         )
         plt.legend(framealpha=1, frameon=True, fontsize=12)
+        
+    def superfit(self):
+          try:
+               print(
+                    "Running optimization for spectrum file: {0} with resolution = {1} Å".format(
+                         self.name_no_extension, parameters.resolution
+                    )
+               )
 
+               kill_header_and_bin(
+                    self.original_path_name,
+                    parameters.resolution,
+                    save_bin=self.binned_name,
+               )
+
+               all_parameter_space(
+                    self.int_obj,
+                    parameters.redshift,
+                    parameters.extconstant,
+                    parameters.templates_sn_trunc,
+                    parameters.templates_gal_trunc,
+                    parameters.lam,
+                    parameters.resolution,
+                    parameters.iterations,
+                    kind=parameters.kind,
+                    original=self.binned_name,
+                    save=self.results_name,
+                    show=parameters.show,
+                    minimum_overlap=parameters.minimum_overlap,
+               )
+
+          except Exception:
+               resolution = 30
+               print("NGSF failed. Retrying for resolution = {0} Å".format(resolution))
+
+               kill_header_and_bin(
+                    self.original_path_name, resolution, save_bin=self.binned_name
+               )
+
+               all_parameter_space(
+                    self.int_obj,
+                    parameters.redshift,
+                    parameters.extconstant,
+                    parameters.templates_sn_trunc,
+                    parameters.templates_gal_trunc,
+                    parameters.lam,
+                    resolution,
+                    parameters.iterations,
+                    kind=parameters.kind,
+                    original=self.binned_name,
+                    save=self.results_name,
+                    show=parameters.show,
+                    minimum_overlap=parameters.minimum_overlap,
+               )
+
+          # Read the results from the CSV file
+          self.results = pd.read_csv(self.results_path)
+
+          # Add sn_name column
+          sn_names = []
+          nova_ints = []  # New list to store nova_int values
+          for j in range(len(self.results)):
+               row = self.results.iloc[j]
+
+               short_name = row["SN"]
+
+               # Get all names from the dictionary
+               full_names = [str(x) for x in self.metadata.shorhand_dict.keys()]
+               short_names = [str(x) for x in self.metadata.shorhand_dict.values()]
+
+               for i in range(len(short_names)):
+                    if str(short_names[i]) == str(short_name):
+                         sn_best_fullname = full_names[i]
+                         sn_short_name = short_names[i]
+                         idx = sn_short_name.rfind("/")
+                         subtype = sn_short_name[:idx]
+
+               sn_name = "bank/binnings/10A/sne/" + subtype + "/" + sn_best_fullname
+               sn_names.append(sn_name)
+
+               # Load nova and host data
+               nova = kill_header(sn_name)
+               nova[:, 1] = nova[:, 1] / np.nanmedian(nova[:, 1])
+
+               z = row["Z"]
+               extmag = row["A_v"]
+
+               redshifted_nova = nova[:, 0] * (z + 1)
+               extinct_nova = nova[:, 1] * 10 ** (-0.4 * extmag * Alam(nova[:, 0])) / (z + 1)
+
+               nova_int = interpolate.interp1d(
+                    redshifted_nova, extinct_nova, bounds_error=False, fill_value="nan"
+               )
+               nova_int_values = nova_int(parameters.lam)
+               nova_ints.append(nova_int_values)
+
+          # Add the sn_name and nova_int columns to the DataFrame
+          self.results['sn_name'] = sn_names
+          self.results['nova_int'] = pd.DataFrame(nova_ints).mean(axis=1)  # Add nova_int column
+
+          # Save the updated results back to the CSV file
+          self.results.to_csv(self.results_path, index=False)
+
+          result_number = 0
+
+          if parameters.n > len(self.results):
+               result_number = result_number + len(self.results)
+          elif len(self.results) >= parameters.n:
+               result_number = result_number + parameters.n
+
+          for j in range(result_number):
+               row = self.results.iloc[j]
+
+               hg_name = row["GALAXY"]
+               short_name = row["SN"]
+               bb = row["CONST_SN"]
+               dd = row["CONST_GAL"]
+               z = row["Z"]
+               extmag = row["A_v"]
+               sn_cont = row["Frac(SN)"]
+
+               # Get all names from the dictionary
+               full_names = [str(x) for x in self.metadata.shorhand_dict.keys()]
+               short_names = [str(x) for x in self.metadata.shorhand_dict.values()]
+
+               for i in range(0, len(short_names)):
+                    if str(short_names[i]) == str(short_name):
+                         sn_best_fullname = full_names[i]
+                         sn_short_name = short_names[i]
+                         idx = sn_short_name.rfind("/")
+                         subtype = sn_short_name[:idx]
+
+               int_obj = self.int_obj
+
+               sn_name = "bank/binnings/10A/sne/" + subtype + "/" + sn_best_fullname
+               hg_name = "bank/binnings/10A/gal/" + hg_name
+
+               nova = kill_header(sn_name)
+               nova[:, 1] = nova[:, 1] / np.nanmedian(nova[:, 1])
+
+               host = np.loadtxt(hg_name)
+               host[:, 1] = host[:, 1] / np.nanmedian(host[:, 1])
+
+               # Interpolate supernova and host galaxy
+               redshifted_nova = nova[:, 0] * (z + 1)
+               extinct_nova = nova[:, 1] * 10 ** (-0.4 * extmag * Alam(nova[:, 0])) / (z + 1)
+
+               reshifted_host = host[:, 0] * (z + 1)
+               reshifted_hostf = host[:, 1] / (z + 1)
+
+               nova_int = interpolate.interp1d(
+                    redshifted_nova, extinct_nova, bounds_error=False, fill_value="nan"
+               )
+               host_int = interpolate.interp1d(
+                    reshifted_host, reshifted_hostf, bounds_error=False, fill_value="nan"
+               )
+               host_nova = bb * nova_int(parameters.lam) + dd * host_int(parameters.lam)
+
+               sn_type = short_name[: short_name.find("/")]
+               hg_name = hg_name[hg_name.rfind("/") + 1 :]
+               subclass = short_name[short_name.find("/") + 1 : short_name.rfind("/")]
+               phase = str(short_name[short_name.rfind(":") + 1 : -1])
+
+               plt.figure(figsize=(8 * np.sqrt(2), 8))
+               plt.plot(parameters.lam, int_obj, "r", label="Input object: " + self.name)
+               plt.plot(
+                    parameters.lam,
+                    host_nova,
+                    "g",
+                    label="SN: "
+                    + sn_type
+                    + " - "
+                    + subclass
+                    + " - Phase: "
+                    + phase
+                    + "\nHost: "
+                    + str(hg_name)
+                    + "\nSN contrib: {0: .1f}%".format(100 * sn_cont),
+               )
+               plt.legend(framealpha=1, frameon=True, fontsize=12)
+               plt.ylabel("Flux arbitrary", fontsize=14)
+               plt.xlabel("Lamda", fontsize=14)
+               plt.title("Best fit for z = " + str(z), fontsize=15, fontweight="bold")
+
+               if parameters.show_plot_png:
+                    plt.savefig(self.results_name + "_" + str(j) + ".png")
+               else:
+                    plt.savefig(self.results_name + "_" + str(j) + ".pdf")
+
+               if parameters.show == 1:
+                    plt.show()
+
+'''
     def superfit(self):
 
-        try:
-            print(
-                "Running optimization for spectrum file: {0} with resolution = {1} Å".format(
-                    self.name_no_extension, parameters.resolution
-                )
-            )
+         try:
+             print(
+                 "Running optimization for spectrum file: {0} with resolution = {1} Å".format(
+                     self.name_no_extension, parameters.resolution
+                 )
+             )
 
-            kill_header_and_bin(
-                self.original_path_name,
-                parameters.resolution,
-                save_bin=self.binned_name,
-            )
+             kill_header_and_bin(
+                 self.original_path_name,
+                 parameters.resolution,
+                 save_bin=self.binned_name,
+             )
 
-            all_parameter_space(
-                self.int_obj,
-                parameters.redshift,
-                parameters.extconstant,
-                parameters.templates_sn_trunc,
-                parameters.templates_gal_trunc,
-                parameters.lam,
-                parameters.resolution,
-                parameters.iterations,
-                kind=parameters.kind,
-                original=self.binned_name,
-                save=self.results_name,
-                show=parameters.show,
-                minimum_overlap=parameters.minimum_overlap,
-            )
+             all_parameter_space(
+                 self.int_obj,
+                 parameters.redshift,
+                 parameters.extconstant,
+                 parameters.templates_sn_trunc,
+                 parameters.templates_gal_trunc,
+                 parameters.lam,
+                 parameters.resolution,
+                 parameters.iterations,
+                 kind=parameters.kind,
+                 original=self.binned_name,
+                 save=self.results_name,
+                 show=parameters.show,
+                 minimum_overlap=parameters.minimum_overlap,
+             )
 
-        except Exception:
+         except Exception:
 
-            resolution = 30
-            print("NGSF failed. Retrying for resolution = {0} Å".format(resolution))
+             resolution = 30
+             print("NGSF failed. Retrying for resolution = {0} Å".format(resolution))
 
-            kill_header_and_bin(
-                self.original_path_name, resolution, save_bin=self.binned_name
-            )
+             kill_header_and_bin(
+                 self.original_path_name, resolution, save_bin=self.binned_name
+             )
 
-            all_parameter_space(
-                self.int_obj,
-                parameters.redshift,
-                parameters.extconstant,
-                parameters.templates_sn_trunc,
-                parameters.templates_gal_trunc,
-                parameters.lam,
-                resolution,
-                parameters.iterations,
-                kind=parameters.kind,
-                original=self.binned_name,
-                save=self.results_name,
-                show=parameters.show,
-                minimum_overlap=parameters.minimum_overlap,
-            )
+             all_parameter_space(
+                 self.int_obj,
+                 parameters.redshift,
+                 parameters.extconstant,
+                 parameters.templates_sn_trunc,
+                 parameters.templates_gal_trunc,
+                 parameters.lam,
+                 resolution,
+                 parameters.iterations,
+                 kind=parameters.kind,
+                 original=self.binned_name,
+                 save=self.results_name,
+                 show=parameters.show,
+                 minimum_overlap=parameters.minimum_overlap,
+             )
 
-        self.results = pd.read_csv(self.results_path)
+         # Read the results from the CSV file
+         self.results = pd.read_csv(self.results_path)
 
-        result_number = 0
+         # Add sn_name column
+         sn_names = []
+         for j in range(len(self.results)):
+             row = self.results.iloc[j]
 
-        if parameters.n > len(self.results):
+             short_name = row["SN"]
 
-            result_number = result_number + len(self.results)
+             # Get all names from the dictionary
+             full_names = [str(x) for x in self.metadata.shorhand_dict.keys()]
+             short_names = [str(x) for x in self.metadata.shorhand_dict.values()]
 
-        elif len(self.results) >= parameters.n:
+             for i in range(len(short_names)):
+                 if str(short_names[i]) == str(short_name):
+                     sn_best_fullname = full_names[i]
+                     sn_short_name = short_names[i]
+                     idx = sn_short_name.rfind("/")
+                     subtype = sn_short_name[:idx]
 
-            result_number = result_number + parameters.n
+             sn_name = "bank/binnings/10A/sne/" + subtype + "/" + sn_best_fullname
+             sn_names.append(sn_name)
 
-        for j in range(result_number):
+         # Add the sn_name column to the DataFrame
+         self.results['sn_name'] = sn_names
 
-            row = self.results.iloc[j]
+         # Save the updated results back to the CSV file
+         self.results.to_csv(self.results_path, index=False)
 
-            hg_name = row["GALAXY"]
-            short_name = row["SN"]
-            bb = row["CONST_SN"]
-            dd = row["CONST_GAL"]
-            z = row["Z"]
-            extmag = row["A_v"]
-            sn_cont = row["Frac(SN)"]
+         result_number = 0
 
-            # Get all names from the dictionary
-            full_names = [str(x) for x in self.metadata.shorhand_dict.keys()]
-            short_names = [str(x) for x in self.metadata.shorhand_dict.values()]
+         if parameters.n > len(self.results):
+             result_number = result_number + len(self.results)
+         elif len(self.results) >= parameters.n:
+             result_number = result_number + parameters.n
 
-            # print(full_names)
+         for j in range(result_number):
+             row = self.results.iloc[j]
 
-            for i in range(0, len(short_names)):
-                if str(short_names[i]) == str(short_name):
-                    sn_best_fullname = full_names[i]
-                    sn_short_name = short_names[i]
-                    idx = sn_short_name.rfind("/")
-                    subtype = sn_short_name[:idx]
+             hg_name = row["GALAXY"]
+             short_name = row["SN"]
+             bb = row["CONST_SN"]
+             dd = row["CONST_GAL"]
+             z = row["Z"]
+             extmag = row["A_v"]
+             sn_cont = row["Frac(SN)"]
 
-            int_obj = self.int_obj
+             # Get all names from the dictionary
+             full_names = [str(x) for x in self.metadata.shorhand_dict.keys()]
+             short_names = [str(x) for x in self.metadata.shorhand_dict.values()]
 
-            sn_name = "bank/binnings/10A/sne/" + subtype + "/" + sn_best_fullname
-            hg_name = "bank/binnings/10A/gal/" + hg_name
+             for i in range(0, len(short_names)):
+                 if str(short_names[i]) == str(short_name):
+                     sn_best_fullname = full_names[i]
+                     sn_short_name = short_names[i]
+                     idx = sn_short_name.rfind("/")
+                     subtype = sn_short_name[:idx]
 
-            # print(sn_name)
+             int_obj = self.int_obj
 
-            nova = kill_header(sn_name)
-            nova[:, 1] = nova[:, 1] / np.nanmedian(nova[:, 1])
+             sn_name = "bank/binnings/10A/sne/" + subtype + "/" + sn_best_fullname
+             hg_name = "bank/binnings/10A/gal/" + hg_name
 
-            host = np.loadtxt(hg_name)
-            host[:, 1] = host[:, 1] / np.nanmedian(host[:, 1])
+             nova = kill_header(sn_name)
+             nova[:, 1] = nova[:, 1] / np.nanmedian(nova[:, 1])
 
-            # Interpolate supernova and host galaxy
-            # redshifted_nova   =  nova[:,0]*(z+1)
-            # extinct_nova      =  nova[:,1]*10**(-0.4*extmag * Alam(nova[:,0]))/(1+z)
+             host = np.loadtxt(hg_name)
+             host[:, 1] = host[:, 1] / np.nanmedian(host[:, 1])
 
-            # reshifted_host    =  host[:,0]*(z+1)
-            # reshifted_hostf   =  host[:,1]/(z+1)
+             # Interpolate supernova and host galaxy
+             redshifted_nova = nova[:, 0] * (z + 1)
+             extinct_nova = nova[:, 1] * 10 ** (-0.4 * extmag * Alam(nova[:, 0])) / (z + 1)
 
-            redshifted_nova = nova[:, 0] * (z + 1)
-            extinct_nova = (
-                nova[:, 1] * 10 ** (-0.4 * extmag * Alam(nova[:, 0])) / (z + 1)
-            )
+             reshifted_host = host[:, 0] * (z + 1)
+             reshifted_hostf = host[:, 1] / (z + 1)
 
-            reshifted_host = host[:, 0] * (z + 1)
-            reshifted_hostf = host[:, 1] / (z + 1)
+             nova_int = interpolate.interp1d(
+                 redshifted_nova, extinct_nova, bounds_error=False, fill_value="nan"
+             )
+             host_int = interpolate.interp1d(
+                 reshifted_host, reshifted_hostf, bounds_error=False, fill_value="nan"
+             )
+             host_nova = bb * nova_int(parameters.lam) + dd * host_int(parameters.lam)
 
-            nova_int = interpolate.interp1d(
-                redshifted_nova, extinct_nova, bounds_error=False, fill_value="nan"
-            )
-            host_int = interpolate.interp1d(
-                reshifted_host, reshifted_hostf, bounds_error=False, fill_value="nan"
-            )
-            host_nova = bb * nova_int(parameters.lam) + dd * host_int(parameters.lam)
+             sn_type = short_name[: short_name.find("/")]
+             hg_name = hg_name[hg_name.rfind("/") + 1 :]
+             subclass = short_name[short_name.find("/") + 1 : short_name.rfind("/")]
+             phase = str(short_name[short_name.rfind(":") + 1 : -1])
 
-            sn_type = short_name[: short_name.find("/")]
-            hg_name = hg_name[hg_name.rfind("/") + 1 :]
-            subclass = short_name[short_name.find("/") + 1 : short_name.rfind("/")]
-            phase = str(short_name[short_name.rfind(":") + 1 : -1])
+             plt.figure(figsize=(8 * np.sqrt(2), 8))
+             plt.plot(parameters.lam, int_obj, "r", label="Input object: " + self.name)
+             plt.plot(
+                 parameters.lam,
+                 host_nova,
+                 "g",
+                 label="SN: "
+                 + sn_type
+                 + " - "
+                 + subclass
+                 + " - Phase: "
+                 + phase
+                 + "\nHost: "
+                 + str(hg_name)
+                 + "\nSN contrib: {0: .1f}%".format(100 * sn_cont),
+             )
+             plt.legend(framealpha=1, frameon=True, fontsize=12)
+             plt.ylabel("Flux arbitrary", fontsize=14)
+             plt.xlabel("Lamda", fontsize=14)
+             plt.title("Best fit for z = " + str(z), fontsize=15, fontweight="bold")
 
-            plt.figure(figsize=(8 * np.sqrt(2), 8))
-            plt.plot(parameters.lam, int_obj, "r", label="Input object: " + self.name)
-            plt.plot(
-                parameters.lam,
-                host_nova,
-                "g",
-                label="SN: "
-                + sn_type
-                + " - "
-                + subclass
-                + " - Phase: "
-                + phase
-                + "\nHost: "
-                + str(hg_name)
-                + "\nSN contrib: {0: .1f}%".format(100 * sn_cont),
-            )
-            plt.legend(framealpha=1, frameon=True, fontsize=12)
-            plt.ylabel("Flux arbitrary", fontsize=14)
-            plt.xlabel("Lamda", fontsize=14)
-            plt.title("Best fit for z = " + str(z), fontsize=15, fontweight="bold")
+             if parameters.show_plot_png:
+                 plt.savefig(self.results_name + "_" + str(j) + ".png")
+             else:
+                 plt.savefig(self.results_name + "_" + str(j) + ".pdf")
 
-            if parameters.show_plot_png:
-                plt.savefig(self.results_name + "_" + str(j) + ".png")
-            else:
-                plt.savefig(self.results_name + "_" + str(j) + ".pdf")
+             if parameters.show == 1:
+                 plt.show()
 
-            if parameters.show == 1:
-                plt.show()
-
-    def results(self):
-
-        if os.path.isfile(self.results_path):
-            results = self.results
-        else:
-            raise Exception("Do the superfit! <( @_@" ")> ")
-
-        return results
-
-    def any_result(self, j):
-
-        row = self.results.iloc[j]
-
-        hg_name = row["GALAXY"]
-        short_name = row["SN"]
-        bb = row["CONST_SN"]
-        dd = row["CONST_GAL"]
-        z = row["Z"]
-        extmag = row["A_v"]
-        sn_cont = row["Frac(SN)"]
-
-        # Get all names from the dictionary
-        full_names = [str(x) for x in self.metadata.shorhand_dict.keys()]
-        short_names = [str(x) for x in self.metadata.shorhand_dict.values()]
-
-        for i in range(0, len(short_names)):
-            if str(short_names[i]) == str(short_name):
-                sn_best_fullname = full_names[i]
-                sn_short_name = short_names[i]
-                idx = sn_short_name.rfind("/")
-                subtype = sn_short_name[:idx]
-
-        int_obj = self.int_obj
-
-        sn_name = "bank/binnings/10A/sne/" + subtype + "/" + sn_best_fullname
-        hg_name = "bank/binnings/10A/gal/" + hg_name
-
-        nova = kill_header(sn_name)
-        nova[:, 1] = nova[:, 1] / np.nanmedian(nova[:, 1])
-
-        host = np.loadtxt(hg_name)
-        host[:, 1] = host[:, 1] / np.nanmedian(host[:, 1])
-
-        # Interpolate supernova and host galaxy
-        redshifted_nova = nova[:, 0] * (z + 1)
-        extinct_nova = nova[:, 1] * 10 ** (-0.4 * extmag * Alam(nova[:, 0])) / (z + 1)
-
-        reshifted_host = host[:, 0] * (z + 1)
-        reshifted_hostf = host[:, 1] / (z + 1)
-
-        nova_int = interpolate.interp1d(
-            redshifted_nova, extinct_nova, bounds_error=False, fill_value="nan"
-        )
-        host_int = interpolate.interp1d(
-            reshifted_host, reshifted_hostf, bounds_error=False, fill_value="nan"
-        )
-        host_nova = bb * nova_int(parameters.lam) + dd * host_int(parameters.lam)
-
-        sn_type = short_name[: short_name.find("/")]
-        hg_name = hg_name[hg_name.rfind("/") + 1 :]
-        subclass = short_name[short_name.find("/") + 1 : short_name.rfind("/")]
-        phase = str(short_name[short_name.rfind(":") + 1 : -1])
-        plt.figure(figsize=(8 * np.sqrt(2), 8))
-        plt.plot(parameters.lam, int_obj, "r", label="Input object: " + self.name)
-        plt.plot(
-            parameters.lam,
-            host_nova,
-            "g",
-            label="SN: "
-            + sn_type
-            + " - "
-            + subclass
-            + " - Phase: "
-            + phase
-            + "\nHost: "
-            + str(hg_name)
-            + "\nSN contrib: {0: .1f}%".format(100 * sn_cont),
-        )
-        plt.legend(framealpha=1, frameon=True, fontsize=12)
-        plt.ylabel("Flux arbitrary", fontsize=14)
-        plt.xlabel("Lamda", fontsize=14)
-        plt.title("Best fit for z = " + str(z), fontsize=15, fontweight="bold")
-
-        if parameters.show_plot_png:
-            plt.savefig(self.results_name + "_" + str(j) + ".png")
-        else:
-            plt.savefig(self.results_name + "_" + str(j) + ".pdf")
-
-        if parameters.show == 1:
-            plt.show()
 
     def convolution(self):
 
@@ -440,3 +554,4 @@ class Superfit:
 
         filtered = gaussian_filter1d(self.flux, sig)
         plt.plot(self.lamda, filtered)
+'''
