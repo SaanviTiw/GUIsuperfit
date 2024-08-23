@@ -1,85 +1,61 @@
 import dash
 import dash_bootstrap_components as dbc
-from dash import dcc, html, dash_table
-from dash.dependencies import Input, Output, State
+from dash import dcc, html, dash_table, Input, Output, State, callback
 from dash.exceptions import PreventUpdate
 import pandas as pd
 import plotly.graph_objs as go
-from extinction import ccm89, apply, remove
 import base64
 import io
-import json
-from astropy.io import fits
-import os
-import subprocess
-import plotly
 import numpy as np
-from dash import callback
-import time
-from watchdog.events import FileSystemEventHandler
+import os
 
-external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
+# Dash app initialization
 dash.register_page(__name__)
 
+# Define the directory containing binned spectra files
+BINSPEC_DIR = "/home/stiwary/Superfit/GUIsuperfit/mergedapp/NGSF/NGSF"
 
-def read_sfo(sfo_filename):
-    sfo_dictionary = {}
-    newlist = []
-    df = pd.DataFrame(columns=['file', 'SN', 'Epoch', 'Type', 'S', 'z', 'Galaxy', 'Av', 'C', 'F', 'gfrac', 'sfrac'])
-    with open(sfo_filename, "r") as opened_file:
-        rows = opened_file.readlines()
-        for row in rows:
-            if row[0] == ';':
-                pair = row.split('=', 1)
-                pair[0] = pair[0].strip(';').strip()
-                pair[1] = pair[1].strip()
-                try:
-                    pair[1] = float(pair[1])
-                except ValueError:
-                    pass
-                sfo_dictionary[pair[0]] = pair[1]
-            else:
-                file, S, z, Galaxy, Av, C, F, gfrac, sfrac = row.split()
-                category, Type, filename = file.split('/')
-                S = float(S)
-                z = float(z)
-                Av = float(Av)
-                C = float(C)
-                F = float(F)
-                gfrac = float(gfrac)
-                sfrac = float(sfrac)
-                SN, Epoch, template_filetype = filename.split('.')
-                if S < 999:
-                    newlist.append([file, SN, Epoch, Type, S, z, Galaxy, Av, C, F, gfrac, sfrac])
-    df = pd.DataFrame(newlist, columns=['file', 'SN', 'Epoch', 'Type', 'S', 'z', 'Galaxy', 'Av', 'C', 'F', 'gfrac', 'sfrac'])
-    return sfo_dictionary, df
+# Global DataFrame to store CSV data
+df = pd.DataFrame(columns=[
+    'SPECTRUM', 'GALAXY', 'SN', 'CONST_SN', 'CONST_GAL', 'Z', 'A_v', 'Phase',
+    'Band', 'Frac(SN)', 'Frac(gal)', 'CHI2/dof', 'CHI2/dof2'
+])
+
+# Function to read and process spectral data
 def read_spectrum(spectrum_path):
     return pd.read_csv(spectrum_path, delim_whitespace=True, names=['wav', 'flux'], header=None)
+
 def normalize_spectrum(spectrum):
     median = spectrum['flux'].median()
     spectrum['flux'] = spectrum['flux'] / median
     return spectrum
-def scale_spectrum(spectrum, scale_value):
-    spectrum['flux'] = spectrum['flux'] * scale_value
-    return spectrum
+
 def binspec(spectrum, start_wavelength, end_wavelength, wavelength_bin):
     binned_wavelength = np.arange(start_wavelength, end_wavelength, wavelength_bin)
     binned_flux = np.interp(binned_wavelength, spectrum["wav"], spectrum["flux"], left=np.nan, right=np.nan)
     return pd.DataFrame(list(zip(binned_wavelength, binned_flux)), columns=["wav", "flux"])
-def redden_scale_template(template, c, Av, z):
-    unredshifted_wav = template["wav"].to_numpy() / (1.0 + z)
-    np_template_flux = template["flux"].to_numpy()
-    output_flux = apply(ccm89(unredshifted_wav, Av, 3.1), np_template_flux)
-    output_df = template.copy()
-    output_df["flux"] = c * output_flux
-    return output_df
-sfo_filename = 'SN2019ein.p02.sfo'
-sfo_dictionary, df = read_sfo(sfo_filename)
-observation_filename = sfo_dictionary["o"].split('/')[-1]
-observed_spectrum = read_spectrum(observation_filename)
-normalized_observed_spectrum = normalize_spectrum(observed_spectrum)
-app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
+
+def find_spectrum_file(base_dir, spectrum_name):
+    for root, dirs, files in os.walk(base_dir):
+        for file in files:
+            if file.startswith(spectrum_name) and file.endswith('_binned.txt'):
+                return os.path.join(root, file)
+    return None
+    
+def adjust_galaxy_spectrum(galaxy_df, const_gal):
+    if pd.notna(const_gal) and galaxy_df.shape[1] > 1:
+        galaxy_df.iloc[:, 1] = galaxy_df.iloc[:, 1] * const_gal
+    return galaxy_df
+
+
+
+# Layout of the Dash app
 layout = html.Div([
+    dcc.Upload(
+        id='upload-data',
+        children=html.Button('Upload CSV'),
+        multiple=False
+    ),
     html.Div(id='datatable-interactivity-container'),
     html.Label('Show graphs:'),
     dcc.Checklist(
@@ -99,41 +75,43 @@ layout = html.Div([
         id='bin_input',
         size='30px',
         type='number',
-        value=sfo_dictionary["disp"],
+        value=10,
     ),
     dash_table.DataTable(
         id='datatable-interactivity',
         columns=[
-            {"name": "file", "id": "file", "deletable": False},
-            {"name": "SN", "id": "SN", "deletable": False},
-            {"name": "Epoch", "id": "Epoch", "deletable": False},
-            {"name": "Type", "id": "Type", "deletable": False},
-            {"name": "S", "id": "S", "deletable": False},
-            {"name": "z", "id": "z", "deletable": False},
-            {"name": "Galaxy", "id": "Galaxy", "deletable": False},
-            {"name": "Av", "id": "Av", "deletable": False},
-            {"name": "C", "id": "C", "deletable": False},
-            {"name": "F", "id": "F", "deletable": False},
-            {"name": "gfrac", "id": "gfrac", "deletable": False},
-            {"name": "sfrac", "id": "sfrac", "deletable": False},
+            {"name": "SPECTRUM", "id": "SPECTRUM"},
+            {"name": "GALAXY", "id": "GALAXY"},
+            {"name": "SN", "id": "SN"},
+            {"name": "CONST_SN", "id": "CONST_SN"},
+            {"name": "CONST_GAL", "id": "CONST_GAL"},
+            {"name": "Z", "id": "Z"},
+            {"name": "A_v", "id": "A_v"},
+            {"name": "Phase", "id": "Phase"},
+            {"name": "Band", "id": "Band"},
+            {"name": "Frac(SN)", "id": "Frac(SN)"},
+            {"name": "Frac(gal)", "id": "Frac(gal)"},
+            {"name": "CHI2/dof", "id": "CHI2/dof"},
+            {"name": "CHI2/dof2", "id": "CHI2/dof2"}
         ],
         style_header={
             'fontWeight': 'bold',
             'textAlign': 'center'
         },
         style_cell_conditional=[
-            {'if': {'column_id': 'file'}, 'textAlign': 'left', 'width': '120px'},
-            {'if': {'column_id': 'SN'}, 'textAlign': 'left', 'width': '60px'},
-            {'if': {'column_id': 'Epoch'}, 'textAlign': 'left', 'width': '60px'},
-            {'if': {'column_id': 'Type'}, 'textAlign': 'left', 'width': '60px'},
-            {'if': {'column_id': 'S'}, 'width': '40px'},
-            {'if': {'column_id': 'z'}, 'width': '40px'},
-            {'if': {'column_id': 'Galaxy'}, 'textAlign': 'left', 'width': '120px'},
-            {'if': {'column_id': 'Av'}, 'width': '40px'},
-            {'if': {'column_id': 'C'}, 'width': '40px'},
-            {'if': {'column_id': 'F'}, 'width': '40px'},
-            {'if': {'column_id': 'gfrac'}, 'width': '60px'},
-            {'if': {'column_id': 'sfrac'}, 'width': '60px'}
+            {'if': {'column_id': 'SPECTRUM'}, 'textAlign': 'left', 'width': '150px'},
+            {'if': {'column_id': 'GALAXY'}, 'textAlign': 'left', 'width': '100px'},
+            {'if': {'column_id': 'SN'}, 'textAlign': 'left', 'width': '100px'},
+            {'if': {'column_id': 'CONST_SN'}, 'textAlign': 'left', 'width': '100px'},
+            {'if': {'column_id': 'CONST_GAL'}, 'textAlign': 'left', 'width': '100px'},
+            {'if': {'column_id': 'Z'}, 'textAlign': 'left', 'width': '60px'},
+            {'if': {'column_id': 'A_v'}, 'textAlign': 'left', 'width': '60px'},
+            {'if': {'column_id': 'Phase'}, 'textAlign': 'left', 'width': '80px'},
+            {'if': {'column_id': 'Band'}, 'textAlign': 'left', 'width': '60px'},
+            {'if': {'column_id': 'Frac(SN)'}, 'textAlign': 'left', 'width': '80px'},
+            {'if': {'column_id': 'Frac(gal)'}, 'textAlign': 'left', 'width': '80px'},
+            {'if': {'column_id': 'CHI2/dof'}, 'textAlign': 'left', 'width': '80px'},
+            {'if': {'column_id': 'CHI2/dof2'}, 'textAlign': 'left', 'width': '80px'},
         ],
         data=df.to_dict('records'),
         editable=True,
@@ -149,76 +127,260 @@ layout = html.Div([
 ])
 
 
-
-
-
-
-
+'''
 @callback(
-    Output('datatable-interactivity-container', "children"),
-    [Input('datatable-interactivity', "derived_virtual_data"),
-     Input('datatable-interactivity', "derived_virtual_selected_rows"),
+    [Output('datatable-interactivity', 'data'),
+     Output('datatable-interactivity', 'columns'),
+     Output('datatable-interactivity-container', 'children')],
+    [Input('upload-data', 'contents'),
+     Input('datatable-interactivity', 'derived_virtual_selected_rows'),
      Input('bin_input', 'value'),
      Input('plotting_checklist', 'value')]
 )
-def update_graphs(rows, derived_virtual_selected_rows, bin_input, plotting_checklist):
-    if derived_virtual_selected_rows is None:
-        derived_virtual_selected_rows = []
-    if bin_input == 0:
-        bin_input = 1
-    if plotting_checklist is None:
-        plotting_checklist = []
-    dff = df if rows is None else pd.DataFrame(rows)
-    selection = 0
-    for i in derived_virtual_selected_rows:
-        selection = int(i)
+def update_graphs(uploaded_contents, derived_virtual_selected_rows, bin_input, plotting_checklist):
+    global df
 
+    BASE_DIR = "/home/stiwary/Superfit/NGSF/"
+    GAL_DIR_SUFFIX = 'bank/binnings/10A/gal/'  # Directory suffix for galaxy spectra
+    expected_columns = [
+        'SPECTRUM', 'GALAXY', 'SN', 'CONST_SN', 'CONST_GAL', 'Z', 'A_v', 'Phase', 'Band',
+        'Frac(SN)', 'Frac(gal)', 'CHI/dof', 'sn_name'
+    ]
 
-    selected_row = dff.iloc[selection].to_dict()
-    template_path = selected_row["file"]
-    template_spectrum = read_spectrum(template_path)
-    normalized_template_spectrum = normalize_spectrum(template_spectrum)
-    reddened_scaled_template = redden_scale_template(normalized_template_spectrum, selected_row["C"], selected_row["Av"], selected_row["z"])
-    scaled_template_spectrum = normalized_template_spectrum.copy()
-    scaled_template_spectrum["flux"] = selected_row["C"] * scaled_template_spectrum["flux"]
-    galaxy_path = "gal/" + selected_row["Galaxy"]
-    galaxy_spectrum = read_spectrum(galaxy_path)
-    normalized_galaxy_spectrum = normalize_spectrum(galaxy_spectrum)
-    scaled_galaxy_spectrum = scale_spectrum(normalized_galaxy_spectrum, selected_row["F"])
-    beginw = 4000
-    endw = 8000
-    bin_wav = bin_input
-    binned_galaxy = binspec(scaled_galaxy_spectrum, beginw, endw, bin_wav)
-    binned_template = binspec(normalized_template_spectrum, beginw, endw, bin_wav)
-    binned_observed = binspec(normalized_observed_spectrum, beginw, endw, bin_wav)
-    ObsMinusGal = binned_observed.copy()
-    ObsMinusGal["flux"] = ObsMinusGal["flux"] - binned_galaxy["flux"]
-    plot_label = {
-        'obs': observation_filename,
-        'gal': selected_row["Galaxy"],
-        'omg': observation_filename + " - " + selected_row["Galaxy"],
-        'tem': selected_row["SN"] + " " + selected_row["Epoch"],
-        'ute': 'Scaled template'
-    }
+    # Read and process uploaded CSV data if available
+    if uploaded_contents is not None:
+        content_type, content_string = uploaded_contents.split(',')
+        decoded = base64.b64decode(content_string)
+        try:
+            csv_df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
+            for col in expected_columns:
+                if col not in csv_df.columns:
+                    csv_df[col] = pd.NA
+
+            csv_df = csv_df[expected_columns]
+        except Exception as e:
+            print(f"Error reading file: {e}")
+            raise PreventUpdate
+    else:
+        csv_df = pd.DataFrame(columns=expected_columns)
+
+    # Update data table
+    columns = [{"name": col, "id": col} for col in csv_df.columns]
+    data = csv_df.to_dict('records')
+
+    # Initialize traces list for plotting
     traces = []
-    for i in plotting_checklist:
-        if i == 'obs':
-            spectrum_to_plot = normalized_observed_spectrum
-        elif i == 'omg':
-            spectrum_to_plot = ObsMinusGal
-        elif i == 'gal':
-            spectrum_to_plot = scaled_galaxy_spectrum
-        elif i == 'tem':
-            spectrum_to_plot = reddened_scaled_template
-        elif i == 'ute':
-            spectrum_to_plot = scaled_template_spectrum
-        traces.append(go.Scatter(
-            x=spectrum_to_plot["wav"],
-            y=spectrum_to_plot["flux"],
-            mode='lines',
-            name=plot_label[i]
-        ))
-    return [
+
+    # Handle selected row for graph generation
+    if derived_virtual_selected_rows:
+        selection = derived_virtual_selected_rows[0]
+        selected_row = csv_df.iloc[selection]
+
+        # Plotting the spectrum from sn_name column if 'Template' is checked
+        if 'tem' in plotting_checklist:
+            sn_name = selected_row.get('sn_name')
+            if pd.notna(sn_name):
+                spectrum_path = os.path.join(BASE_DIR, sn_name)
+                if os.path.isfile(spectrum_path):
+                    try:
+                        print(f"Processing SN spectrum file: {spectrum_path}")
+                        spectrum_df = pd.read_csv(spectrum_path, delim_whitespace=True, header=None, names=['wav', 'flux'])
+                        normalized_spectrum = normalize_spectrum(spectrum_df)
+                        binned_spectrum = binspec(normalized_spectrum, 4000, 8000, bin_input)
+
+                        traces.append(go.Scatter(
+                            x=binned_spectrum["wav"],
+                            y=binned_spectrum["flux"],
+                            mode='lines',
+                            name='sn_name'
+                        ))
+                    except Exception as e:
+                        print(f"Error processing sn_name file: {e}")
+
+        # Plotting the galaxy spectrum if 'Galaxy' is checked
+        if 'gal' in plotting_checklist:
+            galaxy_file = selected_row.get('GALAXY')
+            const_gal = selected_row.get('CONST_GAL', 1)  # Default to 1 if CONST_GAL is missing
+            if pd.notna(galaxy_file):
+                galaxy_spectrum_path = os.path.join(BASE_DIR, GAL_DIR_SUFFIX, galaxy_file)
+                print(f"Galaxy spectrum path: {galaxy_spectrum_path}")
+                print(f"Galaxy constant (CONST_GAL): {const_gal}")
+
+                if os.path.isfile(galaxy_spectrum_path):
+                    try:
+                        # Read the galaxy spectrum file with no header
+                        galaxy_spectrum_df = pd.read_csv(galaxy_spectrum_path, delim_whitespace=True, header=None)
+                        # Check the content of the galaxy spectrum file
+                        print(f"Galaxy spectrum file content:\n{galaxy_spectrum_df.head()}")
+                        # Multiply the second column by CONST_GAL
+                        galaxy_spectrum_df.iloc[:, 1] *= const_gal
+                        # Use the same column names for consistency
+                        galaxy_spectrum_df.columns = ['wav', 'flux']
+                        normalized_galaxy_spectrum = normalize_spectrum(galaxy_spectrum_df)
+                        binned_galaxy_spectrum = binspec(normalized_galaxy_spectrum, 4000, 8000, bin_input)
+
+                        traces.append(go.Scatter(
+                            x=binned_galaxy_spectrum["wav"],
+                            y=binned_galaxy_spectrum["flux"],
+                            mode='lines',
+                            name='Adjusted Galaxy Spectrum: ' + os.path.basename(galaxy_spectrum_path)
+                        ))
+                    except Exception as e:
+                        print(f"Error processing Galaxy file: {e}")
+
+        # Plotting the spectrum from SPECTRUM column if present
+        spectrum_file = selected_row.get('SPECTRUM')
+        if pd.notna(spectrum_file):
+            spectrum_path = os.path.join(BASE_DIR, spectrum_file)
+            if os.path.isfile(spectrum_path):
+                try:
+                    spectrum_df = pd.read_csv(spectrum_path, delim_whitespace=True, header=None, names=['wav', 'flux'])
+                    normalized_spectrum = normalize_spectrum(spectrum_df)
+                    binned_spectrum = binspec(normalized_spectrum, 4000, 8000, bin_input)
+
+                    traces.append(go.Scatter(
+                        x=binned_spectrum["wav"],
+                        y=binned_spectrum["flux"],
+                        mode='lines',
+                        name='SPECTRUM Column Data'
+                    ))
+                except Exception as e:
+                    print(f"Error processing SPECTRUM file: {e}")
+
+    return data, columns, [
+        dcc.Graph(
+            id="SNgraph",
+            figure={
+                'data': traces,
+                'layout': go.Layout(
+                    xaxis=dict(title="Wavelength", tickformat=".0f"),
+                    yaxis=dict(title='Normalized Flux'),
+                    showlegend=True,
+                    legend={'x': 0.9, 'y': 0.95},
+                )
+            }
+        )
+    ]
+'''
+@callback(
+    [Output('datatable-interactivity', 'data'),
+     Output('datatable-interactivity', 'columns'),
+     Output('datatable-interactivity-container', 'children')],
+    [Input('upload-data', 'contents'),
+     Input('datatable-interactivity', 'derived_virtual_selected_rows'),
+     Input('bin_input', 'value'),
+     Input('plotting_checklist', 'value')]
+)
+def update_graphs(uploaded_contents, derived_virtual_selected_rows, bin_input, plotting_checklist):
+    global df
+
+    BASE_DIR = "/home/stiwary/Superfit/NGSF/"
+    GAL_DIR_SUFFIX = 'bank/binnings/10A/gal/'  # Directory suffix for galaxy spectra
+    expected_columns = [
+        'GALAXY', 'SN', 'CONST_SN', 'CONST_GAL', 'Z', 'A_v', 'Phase', 'Band',
+        'Frac(SN)', 'Frac(gal)', 'CHI2/dof', 'sn_name'
+    ]
+
+    # Read and process uploaded CSV data if available
+    if uploaded_contents is not None:
+        content_type, content_string = uploaded_contents.split(',')
+        decoded = base64.b64decode(content_string)
+        try:
+            csv_df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
+            for col in expected_columns + ['SPECTRUM', 'CHI2/dof2']:
+                if col not in csv_df.columns:
+                    csv_df[col] = pd.NA
+
+            # Populate the data excluding the 'SPECTRUM' and 'CHI2/dof2' columns for display
+            display_df = csv_df[expected_columns]
+        except Exception as e:
+            print(f"Error reading file: {e}")
+            raise PreventUpdate
+    else:
+        csv_df = pd.DataFrame(columns=expected_columns + ['SPECTRUM', 'CHI2/dof2'])
+        display_df = csv_df[expected_columns]
+
+    # Update data table
+    columns = [{"name": col, "id": col} for col in display_df.columns]
+    data = display_df.to_dict('records')
+
+    # Initialize traces list for plotting
+    traces = []
+
+    # Handle selected row for graph generation
+    if derived_virtual_selected_rows:
+        selection = derived_virtual_selected_rows[0]
+        selected_row = csv_df.iloc[selection]
+
+        # Plotting the spectrum from sn_name column if 'Template' is checked
+        if 'tem' in plotting_checklist:
+            sn_name = selected_row.get('sn_name')
+            if pd.notna(sn_name):
+                spectrum_path = os.path.join(BASE_DIR, sn_name)
+                if os.path.isfile(spectrum_path):
+                    try:
+                        print(f"Processing SN spectrum file: {spectrum_path}")
+                        spectrum_df = pd.read_csv(spectrum_path, delim_whitespace=True, header=None, names=['wav', 'flux'])
+                        normalized_spectrum = normalize_spectrum(spectrum_df)
+                        binned_spectrum = binspec(normalized_spectrum, 4000, 8000, bin_input)
+
+                        traces.append(go.Scatter(
+                            x=binned_spectrum["wav"],
+                            y=binned_spectrum["flux"],
+                            mode='lines',
+                            name='sn_name'
+                        ))
+                    except Exception as e:
+                        print(f"Error processing sn_name file: {e}")
+
+        # Plotting the galaxy spectrum if 'Galaxy' is checked
+        if 'gal' in plotting_checklist:
+            galaxy_file = selected_row.get('GALAXY')
+            const_gal = selected_row.get('CONST_GAL', 1)  # Default to 1 if CONST_GAL is missing
+            if pd.notna(galaxy_file):
+                galaxy_spectrum_path = os.path.join(BASE_DIR, GAL_DIR_SUFFIX, galaxy_file)
+                print(f"Galaxy spectrum path: {galaxy_spectrum_path}")
+                print(f"Galaxy constant (CONST_GAL): {const_gal}")
+
+                if os.path.isfile(galaxy_spectrum_path):
+                    try:
+                        galaxy_spectrum_df = pd.read_csv(galaxy_spectrum_path, delim_whitespace=True, header=None)
+                        galaxy_spectrum_df.iloc[:, 1] *= const_gal
+                        galaxy_spectrum_df.columns = ['wav', 'flux']
+                        normalized_galaxy_spectrum = normalize_spectrum(galaxy_spectrum_df)
+                        binned_galaxy_spectrum = binspec(normalized_galaxy_spectrum, 4000, 8000, bin_input)
+
+                        traces.append(go.Scatter(
+                            x=binned_galaxy_spectrum["wav"],
+                            y=binned_galaxy_spectrum["flux"],
+                            mode='lines',
+                            name='Adjusted Galaxy Spectrum: ' + os.path.basename(galaxy_spectrum_path)
+                        ))
+                    except Exception as e:
+                        print(f"Error processing Galaxy file: {e}")
+
+        # Plotting the spectrum from SPECTRUM column if present (but not displaying the column)
+        spectrum_file = selected_row.get('SPECTRUM')
+        if pd.notna(spectrum_file):
+            spectrum_path = os.path.join(BASE_DIR, spectrum_file)
+            if os.path.isfile(spectrum_path):
+                try:
+                    spectrum_df = pd.read_csv(spectrum_path, delim_whitespace=True, header=None, names=['wav', 'flux'])
+                    normalized_spectrum = normalize_spectrum(spectrum_df)
+                    binned_spectrum = binspec(normalized_spectrum, 4000, 8000, bin_input)
+
+                    traces.append(go.Scatter(
+                        x=binned_spectrum["wav"],
+                        y=binned_spectrum["flux"],
+                        mode='lines',
+                        name='SPECTRUM Data'
+                    ))
+                except Exception as e:
+                    print(f"Error processing SPECTRUM file: {e}")
+
+        # You can process CHI2/dof2 here if necessary for calculations or other logic
+
+    return data, columns, [
         dcc.Graph(
             id="SNgraph",
             figure={
